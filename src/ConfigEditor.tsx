@@ -10,14 +10,26 @@ interface Props extends DataSourcePluginOptionsEditorProps<DataSourceOptions> {}
 interface State {}
 
 export class ConfigEditor extends PureComponent<Props, State> {
+  constructor(props: Props) {
+    super(props);
+
+    const { onOptionsChange, options } = this.props;
+
+    onOptionsChange({
+      ...options,
+      secureJsonData: {
+        ...options.secureJsonData,
+        code: new URLSearchParams(window.location.search).get('code'),
+      },
+    });
+  }
+
   onClientIdChange = (event: ChangeEvent<HTMLInputElement>) => {
-    console.log('client ID change', event.target.value);
     const { onOptionsChange, options } = this.props;
     const jsonData = {
       ...options.jsonData,
       clientId: event.target.value,
     };
-    console.log('props', jsonData);
     onOptionsChange({ ...options, jsonData });
   };
 
@@ -107,7 +119,7 @@ export class ConfigEditor extends PureComponent<Props, State> {
 
         <div className="gf-form-group">
           <a type="button" href={googleAuthLink}>
-            <img src="public/plugins/serge1peshcoff-google-fit/img/logo.png" />
+            <img src="public/plugins/serge1peshcoff-googlefit-datasource/img/logo.png" />
           </a>
         </div>
       </div>
