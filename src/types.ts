@@ -14,6 +14,7 @@ export const defaultQuery: Partial<MyQuery> = {
  */
 export interface DataSourceOptions extends DataSourceJsonData {
   clientId?: string;
+  redirectURI?: string;
 }
 
 /**

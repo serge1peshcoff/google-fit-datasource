@@ -21,6 +21,10 @@ export class ConfigEditor extends PureComponent<Props, State> {
         ...options.secureJsonData,
         code: new URLSearchParams(window.location.search).get('code'),
       },
+      jsonData: {
+        ...options.jsonData,
+        redirectURI: window.location.href.split('?')[0],
+      },
     });
   }
 

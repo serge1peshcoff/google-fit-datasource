@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"math/rand"
 	"net/http"
+	"os"
+	"path"
+	"strconv"
 	"time"
 
 	"github.com/grafana/grafana-plugin-sdk-go/backend"
@@ -12,6 +14,14 @@ import (
 	"github.com/grafana/grafana-plugin-sdk-go/backend/instancemgmt"
 	"github.com/grafana/grafana-plugin-sdk-go/backend/log"
 	"github.com/grafana/grafana-plugin-sdk-go/data"
+
+	simplejson "github.com/bitly/go-simplejson"
+	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
+)
+
+const (
+	PLUGIN_NAME = "serge1peshcoff-googlefit-datasource"
 )
 
 // newDatasource returns datasource.ServeOpts.
@@ -44,8 +54,6 @@ type SampleDatasource struct {
 // The QueryDataResponse contains a map of RefID to the response for each query, and each response
 // contains Frames ([]*Frame).
 func (td *SampleDatasource) QueryData(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error) {
-	log.DefaultLogger.Info("QueryData", "request", req)
-
 	// create response struct
 	response := backend.NewQueryDataResponse()
 
@@ -105,18 +113,124 @@ func (td *SampleDatasource) query(ctx context.Context, query backend.DataQuery) 
 // datasource configuration page which allows users to verify that
 // a datasource is working as expected.
 func (td *SampleDatasource) CheckHealth(ctx context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error) {
-	var status = backend.HealthStatusOk
-	var message = "Data source is working"
-
-	if rand.Int()%2 == 0 {
-		status = backend.HealthStatusError
-		message = "randomized error"
+	if val, ok := req.PluginContext.DataSourceInstanceSettings.DecryptedSecureJSONData["code"]; !ok || val == "" {
+		return &backend.CheckHealthResult{
+			Status:  backend.HealthStatusError,
+			Message: "Code is not provided. Please press \"Sign in with Google\"",
+		}, nil
 	}
 
+	if val, ok := req.PluginContext.DataSourceInstanceSettings.DecryptedSecureJSONData["clientSecret"]; !ok || val == "" {
+		return &backend.CheckHealthResult{
+			Status:  backend.HealthStatusError,
+			Message: "Client secret is not provided",
+		}, nil
+	}
+
+	jsonData, err := simplejson.NewJson([]byte(req.PluginContext.DataSourceInstanceSettings.JSONData))
+	if err != nil {
+		return &backend.CheckHealthResult{
+			Status:  backend.HealthStatusError,
+			Message: "Could not parse JSON",
+		}, nil
+	}
+
+	clientID := jsonData.Get("clientId").MustString()
+	if clientID == "" {
+		return &backend.CheckHealthResult{
+			Status:  backend.HealthStatusError,
+			Message: "Client ID is not provided",
+		}, nil
+	}
+
+	redirectURI := jsonData.Get("redirectURI").MustString()
+	if redirectURI == "" {
+		return &backend.CheckHealthResult{
+			Status:  backend.HealthStatusError,
+			Message: "Redirect URI is not provided",
+		}, nil
+	}
+
+	clientSecret := req.PluginContext.DataSourceInstanceSettings.DecryptedSecureJSONData["clientSecret"]
+	code := req.PluginContext.DataSourceInstanceSettings.DecryptedSecureJSONData["code"]
+
+	log.DefaultLogger.Debug("clientId", "clientId", clientID)
+	log.DefaultLogger.Debug("clientSecret", "clientSecret", clientSecret)
+	log.DefaultLogger.Debug("code", "code", code)
+	log.DefaultLogger.Debug("redirectURI", "redirectURI", redirectURI)
+
+	token, err := getToken(ctx, clientID, clientSecret, code, redirectURI)
+	if err != nil {
+		return &backend.CheckHealthResult{
+			Status:  backend.HealthStatusError,
+			Message: "Error authorizing",
+		}, nil
+	}
+
+	saveTokenToFile(token, PLUGIN_NAME, req.PluginContext.DataSourceInstanceSettings.ID)
+
 	return &backend.CheckHealthResult{
-		Status:  status,
-		Message: message,
+		Status:  backend.HealthStatusOk,
+		Message: "Everything is okay. Please do not resave, as the auth code is invalidated already.",
 	}, nil
+}
+
+func getToken(ctx context.Context, clientID string, clientSecret string, code string, redirectURI string) (*oauth2.Token, error) {
+	conf := &oauth2.Config{
+		ClientID:     clientID,
+		ClientSecret: clientSecret,
+		Endpoint:     google.Endpoint,
+		RedirectURL:  redirectURI,
+	}
+
+	token, err := conf.Exchange(ctx, code)
+	if err != nil {
+		return nil, err
+	}
+
+	return token, err
+}
+
+func saveTokenToFile(token *oauth2.Token, appID string, datasourceID int64) error {
+	pluginsDirEnv, exists := os.LookupEnv("PLUGINS_DIR")
+	if !exists {
+		pluginsDirEnv = "/var/lib/grafana/plugins"
+	}
+	pluginsDir := path.Join(pluginsDirEnv, appID, "cache")
+
+	log.DefaultLogger.Info("Plugins dir", "dir", pluginsDir)
+
+	if _, err := os.Stat(pluginsDir); os.IsNotExist(err) {
+		log.DefaultLogger.Info("Plugins dir does not exist")
+		os.Mkdir(pluginsDir, os.ModePerm)
+	}
+
+	cacheFile := path.Join(pluginsDir, strconv.FormatInt(int64(datasourceID), 10)+".json")
+	tokenAsString, err := json.Marshal(token)
+	if err != nil {
+		return err
+	}
+
+	os.WriteFile(cacheFile, tokenAsString, os.ModePerm)
+	return nil
+}
+
+func getTokenFromFile(appID string, datasourceID int64) (*oauth2.Token, error) {
+	pluginsDirEnv := os.Getenv("PLUGINS_DIR")
+	pluginsDir := path.Join(pluginsDirEnv, appID, "cache")
+	cacheFile := path.Join(pluginsDir, strconv.FormatInt(int64(datasourceID), 10)+".json")
+	fileContents, err := os.ReadFile(cacheFile)
+	if err != nil {
+		return nil, err
+	}
+
+	var token *oauth2.Token
+	err = json.Unmarshal(fileContents, &token)
+	if err != nil {
+		return nil, err
+	}
+
+	return token, nil
 }
 
 type instanceSettings struct {
