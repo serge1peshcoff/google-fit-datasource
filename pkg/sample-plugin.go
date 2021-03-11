@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io/ioutil"
 	"net/http"
 	"os"
 	"path"
@@ -211,7 +212,7 @@ func saveTokenToFile(token *oauth2.Token, appID string, datasourceID int64) erro
 		return err
 	}
 
-	os.WriteFile(cacheFile, tokenAsString, os.ModePerm)
+	ioutil.WriteFile(cacheFile, tokenAsString, os.ModePerm)
 	return nil
 }
 
