@@ -220,7 +220,7 @@ func getTokenFromFile(appID string, datasourceID int64) (*oauth2.Token, error) {
 	pluginsDirEnv := os.Getenv("PLUGINS_DIR")
 	pluginsDir := path.Join(pluginsDirEnv, appID, "cache")
 	cacheFile := path.Join(pluginsDir, strconv.FormatInt(int64(datasourceID), 10)+".json")
-	fileContents, err := os.ReadFile(cacheFile)
+	fileContents, err := ioutil.ReadFile(cacheFile)
 	if err != nil {
 		return nil, err
 	}
